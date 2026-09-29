@@ -1,0 +1,25 @@
+{
+  "name": "hpi-platform",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Harrison Polling Institute — public tracker + admin dashboard",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server/index.js",
+    "dev": "node --watch src/server/index.js",
+    "passwd": "node src/server/passwd.js",
+    "seed": "node src/server/seed.js",
+    "reseed": "node src/server/seed.js --reset",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "chart.js": "^4.5.1",
+    "express": "^5.2.1",
+    "multer": "^2.4.0",
+    "sharp": "^0.35.5"
+  }
+}
