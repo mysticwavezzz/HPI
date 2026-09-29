@@ -8,7 +8,7 @@ let charts = [];
 const killCharts = () => { charts.forEach((c) => c.destroy()); charts = []; };
 
 // ------------------------------------------------------------- routing
-const ROUTES = { '': ['home', 'Overview'], approval: ['approval', 'Approval Ratings'], elections: ['elections', 'Election Forecast'], forecast: ['elections', 'Election Forecast'], recalls: ['recalls', 'Recall Radar'], method: ['method', 'Methodology'] };
+const ROUTES = { '': ['home', 'Overview'], approval: ['approval', 'Approval Ratings'], elections: ['elections', 'Election Results'], forecast: ['elections', 'Election Results'], recalls: ['recalls', 'Recall Radar'], method: ['method', 'Methodology'] };
 function route() {
   const [seg, arg] = location.hash.replace(/^#\/?/, '').split('/');
   const [key, title] = ROUTES[seg ?? ''] ?? ROUTES[''];
@@ -35,19 +35,20 @@ async function renderHome() {
     const race = races.find((r) => r.status === 'active') ?? races[0];
     const lead = race?.candidates.find((c) => c.id === race.lead.leader);
     const kpi = (lab, val, sub) => `<div class="kpi"><span class="lab">${lab}</span><span class="val">${val}</span><span class="sub">${sub}</span></div>`;
+    const raceKpi = !race ? '' : lead ? kpi(race.status === 'concluded' ? 'Election winner' : 'Election leader', pct(lead.vote_share), `${esc(lead.full_name)} · ${race.lead.total.toLocaleString('en-US')} votes counted`) : kpi('Election', race.lead.total ? 'Tied' : 'Awaiting votes', esc(race.title));
     main.innerHTML = `<p class="eyebrow">Harrison County</p><h1>Civic Intelligence Overview</h1>
-      <p class="lede">Independent tracking of voter sentiment, election forecasts and leadership approval ratings.</p>
+      <p class="lede">Independent tracking of voter sentiment, election results and leadership approval ratings.</p>
       ${officials.length || race || recalls.length ? `<div class="kpis">
         ${byNet[0] ? kpi('Highest net approval', signed(byNet[0].summary.net), esc(byNet[0].full_name)) : ''}
         ${moved[0] && moved[0].summary.badge.delta > 0 ? kpi('Biggest riser', `▲ ${signed(moved[0].summary.badge.delta)}`, esc(moved[0].full_name)) : ''}
         ${moved.at(-1) && moved.at(-1).summary.badge.delta < 0 ? kpi('Biggest decline', `▼ ${signed(moved.at(-1).summary.badge.delta)}`, esc(moved.at(-1).full_name)) : ''}
-        ${lead ? kpi('Election leader', pct(lead.vote_share), `${esc(lead.full_name)} · ${esc(race.title)}`) : ''}
+        ${raceKpi}
         ${kpi('Active recalls', String(recalls.length), recalls.length ? 'See Recall Radar' : 'None filed')}</div>` : ''}
       <div class="section-head"><h2>Latest approval ratings</h2><a href="#/approval">Card view →</a></div>
       ${officials.length ? `<div class="tablewrap"><table><thead><tr><th>Official</th><th>Title</th><th class="num">Net</th><th class="num">Approve</th><th class="num">Disapprove</th><th class="num">Neutral</th><th>Status</th><th>Surveyed</th></tr></thead><tbody>
       ${byNet.map((o) => { const s = o.summary; return `<tr data-open="${o.id}" tabindex="0"><th>${esc(o.full_name)} ${outcomeTag(o)}</th><td>${esc(o.title)}</td><td class="num"><strong>${signed(s.net)}</strong></td><td class="num">${pct(s.approve)}</td><td class="num">${pct(s.disapprove)}</td><td class="num">${pct(s.neutral)}</td><td><span class="badge ${s.badge.key}">${esc(s.badge.icon)} ${esc(s.badge.label)}</span></td><td>${fmtDate(s.survey_end)}<br><span class="meta">n=${s.n.toLocaleString('en-US')} ±${s.moe}</span></td></tr>`; }).join('')}</tbody></table></div><p class="meta">Select a row for the full trend chart.</p>`
         : '<div class="state">No poll results have been published yet.</div>'}
-      ${race ? `<div class="section-head"><h2>Special election snapshot</h2><a href="#/elections">Full forecast →</a></div>${raceHtml(race, { brief: true })}` : ''}`;
+      ${race ? `<div class="section-head"><h2>Special election results</h2><a href="#/elections">Full results →</a></div>${raceHtml(race, { brief: true })}` : ''}`;
     $$('[data-open]', main).forEach((r) => { r.onclick = () => openDetail(Number(r.dataset.open)); r.onkeydown = (e) => e.key === 'Enter' && r.click(); });
   } catch (e) { main.innerHTML = errorBox(e, 'home'); }
 }
@@ -58,7 +59,7 @@ function renderMethod() {
       <dt>Net approval</dt><dd>Approve % (strongly + somewhat) minus disapprove % (strongly + somewhat). Computed by the system, never entered by hand.</dd>
       <dt>Margin of error (±MoE)</dt><dd>Computed at 95% confidence from each survey’s sample size: ±1.96 × √(0.25 / n), the conservative case. Weekly and monthly chart points pool their surveys (sample-size-weighted) and use the combined n.</dd>
       <dt>Status badges</dt><dd>Compare the latest net rating with the previous poll cycle.<br>🟢 ▲ <b>Rising</b>: +3.0 or more · 🔴 ▼ <b>Falling</b>: −3.0 or more · ⚪ ▬ <b>Steady</b>: within ±1.0 · ⚪ △/▽ <b>Edging</b>: between 1.0 and 3.0 · <b>New</b>: only one poll · <b>Stale</b>: no poll in 90 days.</dd>
-      <dt>Election forecasts</dt><dd>Projected vote share with the stated margin of error. A lead is called “outside the margin” only when it exceeds twice the margin of error.</dd>
+      <dt>Election results</dt><dd>Percentages are calculated from the votes counted so far (each candidate’s votes ÷ total votes). Nothing is projected; until votes are reported the race shows “Awaiting votes”. Issue-priority percentages are calculated the same way from counts.</dd>
       <dt>Recalls</dt><dd>Verified signatures against the statutory threshold; concluded recalls move to the referendum archive.</dd>
     </dl>`;
 }
@@ -205,12 +206,12 @@ function drawDetail({ person, interval, points, summary }) {
 
 // ------------------------------------------------------------ forecast
 async function renderElections() {
-  main.innerHTML = loading('forecast');
+  main.innerHTML = loading('election results');
   try {
     const { races } = await api('/api/public/forecast');
-    $('#updated').textContent = 'Election forecast';
-    main.innerHTML = `<p class="eyebrow">Forecast center</p><h1>Special Election Forecast</h1><p class="meta">Projected vote share with margin of error.</p>
-      ${races.length ? races.map((r) => raceHtml(r)).join('') : '<div class="state">No elections are being forecast right now.</div>'}`;
+    $('#updated').textContent = 'Election results';
+    main.innerHTML = `<p class="eyebrow">Election center</p><h1>Special Election Results</h1><p class="meta">Vote share is calculated from votes counted so far — nothing is projected.</p>
+      ${races.length ? races.map((r) => raceHtml(r)).join('') : '<div class="state">No elections to report right now.</div>'}`;
     races.forEach(drawPriorities);
   } catch (e) { main.innerHTML = errorBox(e, 'elections'); }
 }
@@ -220,34 +221,31 @@ async function renderRecalls() {
   try {
     const { recalls, referendums } = await api('/api/public/forecast');
     $('#updated').textContent = 'Recall radar';
-    main.innerHTML = `<p class="eyebrow">Forecast center</p><h1>Recall Radar</h1>
+    main.innerHTML = `<p class="eyebrow">Election center</p><h1>Recall Radar</h1>
       <div class="panel"><div class="ph"><h3>Active recall petitions</h3></div><div class="pb">${recalls.length ? recalls.map(recallHtml).join('') : '<p class="meta">No active recall petitions.</p>'}</div></div>
       <div class="panel"><div class="ph"><h3>Referendum archive</h3></div><div class="pb">${referendumHtml(referendums)}</div></div>`;
   } catch (e) { main.innerHTML = errorBox(e, 'recalls'); }
 }
 
 function raceHtml(r, { brief = false } = {}) {
-  const maxShare = Math.max(...r.candidates.map((c) => c.vote_share), 0);
-  const scale = Math.max(50, Math.ceil((maxShare + r.moe) / 10) * 10);
-  const leader = r.candidates.find((c) => c.id === r.lead.leader);
-  const lean = leader && r.lead.gap != null
-    ? (r.lead.decisive ? `${leader.full_name} leads by ${r.lead.gap} pts — outside the margin of error` : `${leader.full_name} leads by ${r.lead.gap} pts — within the margin of error`) : '';
+  const { total, leader: leaderId, tied, gap_votes: gap, gap_pct: gapPct } = r.lead;
+  const leader = r.candidates.find((c) => c.id === leaderId);
+  const n = (x) => x.toLocaleString('en-US');
+  const status = total === 0 ? 'No votes have been reported yet.'
+    : tied ? 'The race is tied.' : `${leader.full_name} ${r.status === 'concluded' ? 'won' : 'leads'} by ${n(gap)} vote${gap === 1 ? '' : 's'} (${gapPct} points).`;
   return `<section class="panel" aria-labelledby="race-${r.id}">
     <div class="ph"><h3 id="race-${r.id}">${esc(r.title)}</h3></div><div class="pb">
-    <div>${r.status === 'concluded' ? '<span class="status-chip" style="background:var(--yes)">Concluded</span>' : ''}
-      <span class="status-chip">±${r.moe}% margin of error</span>
-      ${r.turnout_min != null || r.turnout_max != null ? `<span class="status-chip" style="background:var(--ink-2)">Est. turnout ${[r.turnout_min, r.turnout_max].filter((x) => x != null).map((x) => x.toLocaleString('en-US')).join('–')} voters</span>` : ''}</div>
-    ${lean ? `<p class="lede">${esc(lean)}.</p>` : ''}
-    <div class="race" role="list">${r.candidates.map((c) => {
-      const w = (c.vote_share / scale) * 100; const wl = (Math.max(c.vote_share - r.moe, 0) / scale) * 100; const wr = (Math.min(c.vote_share + r.moe, scale) / scale) * 100;
-      return `<div class="cand ${c.id === r.lead.leader ? 'lead' : ''}" role="listitem">${pfp(c, 'pfp')}
+    <div>${r.status === 'concluded' ? '<span class="status-chip" style="background:var(--yes)">Concluded</span>' : total ? '<span class="status-chip">Votes counted so far</span>' : '<span class="status-chip" style="background:var(--muted)">Awaiting votes</span>'}
+      ${total ? `<span class="status-chip" style="background:var(--ink-2)">${n(total)} vote${total === 1 ? '' : 's'} reported</span>` : ''}
+      ${r.turnout_min != null || r.turnout_max != null ? `<span class="status-chip" style="background:var(--ink-2)">Expected turnout ${[r.turnout_min, r.turnout_max].filter((x) => x != null).map(n).join('–')} voters</span>` : ''}</div>
+    <p class="lede">${esc(status)}</p>
+    <div class="race" role="list">${r.candidates.map((c) => `<div class="cand ${c.id === leaderId ? 'lead' : ''}" role="listitem">${pfp(c, 'pfp')}
         <div><strong>${esc(c.full_name)}</strong><small>${esc(c.title)}</small> ${outcomeTag(c)}</div>
-        <div class="bar-track" role="img" aria-label="${esc(c.full_name)}: ${pct(c.vote_share)}, plus or minus ${r.moe} points">
-          <div class="bar-fill" style="width:${w}%"></div><div class="whisker" style="left:${wl}%;width:${wr - wl}%"></div>
-          <span class="bar-label" style="left:${Math.max(wr, 0)}%">${pct(c.vote_share)} <span class="meta">±${r.moe}</span></span></div></div>`;
-    }).join('')}</div>
-    ${r.undecided > 0 ? `<p class="meta">Undecided / other: ${pct(r.undecided)}</p>` : ''}
-    ${r.priorities.length && !brief ? `<h3 style="font-size:20px;margin-top:26px">Voter issue priorities</h3><p class="meta">Top issue by candidate’s supporters (each bar totals 100%).</p>
+        <div class="bar-track" role="img" aria-label="${esc(c.full_name)}: ${n(c.votes)} votes${c.vote_share != null ? `, ${pct(c.vote_share)}` : ''}">
+          <div class="bar-fill" style="width:${c.vote_share ?? 0}%"></div>
+          <span class="bar-label" style="left:${Math.min(c.vote_share ?? 0, 78)}%">${c.vote_share != null ? pct(c.vote_share) : '—'} <span class="meta">${n(c.votes)} vote${c.votes === 1 ? '' : 's'}</span></span></div></div>`).join('')}</div>
+    <p class="meta">Percentages are each candidate’s share of the votes counted so far.</p>
+    ${r.priorities.length && !brief ? `<h3 style="font-size:20px;margin-top:26px">Voter issue priorities</h3><p class="meta">Top issue named by each candidate’s supporters (each bar totals 100%).</p>
       <div class="chart-box tall"><canvas id="pri-${r.id}" role="img" aria-label="Stacked bar chart of voter issue priorities by candidate supporter group; a data table follows."></canvas></div>
       <details><summary>View data table</summary>${priorityTable(r)}</details>` : ''}
   </div></section>`;
@@ -303,7 +301,7 @@ function referendumHtml(list) {
   if (!list.length) return '<p class="meta">No concluded referendums on file.</p>';
   return `<div class="tablewrap"><table><thead><tr><th>Concluded</th><th>Official</th><th>Grounds</th><th>Outcome</th><th class="num">Result</th></tr></thead><tbody>
     ${list.map((r) => `<tr><td>${fmtDate(r.concluded_on)}</td><td>${esc(r.person.full_name)}<br><span class="meta">${esc(r.person.title)}</span></td><td>${esc(r.grounds)}</td>
-    <td><span class="tag ${r.outcome === 'Recalled' ? 'recalled' : ''}">${esc(r.outcome)}</span></td><td class="num">${r.result_pct != null ? pct(r.result_pct) : '–'}</td></tr>`).join('')}</tbody></table></div>`;
+    <td><span class="tag ${r.outcome === 'Recalled' ? 'recalled' : ''}">${esc(r.outcome)}</span></td><td class="num">${r.result_pct != null ? `${pct(r.result_pct)} Yes<br><span class="meta">${r.votes_yes.toLocaleString('en-US')} – ${r.votes_no.toLocaleString('en-US')}</span>` : '–'}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 route();

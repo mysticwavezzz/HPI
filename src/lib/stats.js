@@ -120,14 +120,21 @@ export function aggregate(polls, interval) {
   });
 }
 
+/** Percentage share of each count within its group; null for everyone while the group total is 0. */
+export function shares(counts) {
+  const total = counts.reduce((t, c) => t + c, 0);
+  return counts.map((c) => (total > 0 ? round1((c / total) * 100) : null));
+}
+
 /**
- * Race lead classification. The lead between two candidates is treated as
- * "outside the margin" only when it exceeds twice the per-candidate MoE
- * (a conservative rule for the difference of two shares).
+ * Race standings from ACTUAL vote counts (no projections). Percentages, the
+ * leader and the lead margin are all derived here; before any votes are
+ * reported every share is null and there is no leader.
  */
-export function raceLead(candidates, moe) {
-  const sorted = [...candidates].sort((a, b) => b.vote_share - a.vote_share);
-  if (sorted.length < 2) return { leader: sorted[0] ?? null, gap: null, decisive: false };
-  const gap = round1(sorted[0].vote_share - sorted[1].vote_share);
-  return { leader: sorted[0].id, gap, decisive: gap > 2 * moe };
+export function raceLead(candidates) {
+  const total = candidates.reduce((t, c) => t + c.votes, 0);
+  const sorted = [...candidates].sort((a, b) => b.votes - a.votes);
+  if (total === 0 || sorted.length < 2) return { total, leader: null, tied: false, gap_votes: 0, gap_pct: null };
+  const gap = sorted[0].votes - sorted[1].votes;
+  return { total, leader: gap > 0 ? sorted[0].id : null, tied: gap === 0, gap_votes: gap, gap_pct: round1((gap / total) * 100) };
 }

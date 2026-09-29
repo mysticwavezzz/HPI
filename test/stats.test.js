@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { statusBadge, netScore, derive, marginOfError, aggregate, weekStart, raceLead } from '../src/lib/stats.js';
+import { statusBadge, netScore, derive, marginOfError, aggregate, weekStart, raceLead, shares } from '../src/lib/stats.js';
 import { validatePoll } from '../src/lib/validate.js';
 
 const NOW = '2026-09-29';
@@ -45,10 +45,13 @@ test('weekly/monthly aggregation pools by n', () => {
   assert.equal(aggregate([p('2026-09-14', 100, 40), p('2026-10-01', 100, 40)], 'monthly').length, 2);
 });
 
-test('race lead is decisive only beyond 2× MoE', () => {
-  const c = [{ id: 1, vote_share: 39.5 }, { id: 2, vote_share: 26 }];
-  assert.deepEqual(raceLead(c, 2.5), { leader: 1, gap: 13.5, decisive: true });
-  assert.equal(raceLead([{ id: 1, vote_share: 30 }, { id: 2, vote_share: 27 }], 2.5).decisive, false);
+test('race shares and lead come from actual votes only', () => {
+  const c = [{ id: 1, votes: 118 }, { id: 2, votes: 78 }, { id: 3, votes: 104 }];
+  assert.deepEqual(shares([118, 78, 104]), [39.3, 26, 34.7]);
+  assert.deepEqual(raceLead(c), { total: 300, leader: 1, tied: false, gap_votes: 14, gap_pct: 4.7 });
+  assert.deepEqual(shares([0, 0]), [null, null]); // no votes yet -> no percentages
+  assert.equal(raceLead([{ id: 1, votes: 0 }, { id: 2, votes: 0 }]).leader, null);
+  assert.equal(raceLead([{ id: 1, votes: 5 }, { id: 2, votes: 5 }]).tied, true);
 });
 
 test('poll validation: totals, dates, sample size', () => {

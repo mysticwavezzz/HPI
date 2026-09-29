@@ -331,7 +331,7 @@ async function racesPane(pane, reload, autoOpen) {
       <button class="btn sm" data-edit="${r.id}">Edit</button>
       ${r.status === 'active' ? `<button class="btn sm" data-conclude="${r.id}">Conclude…</button>` : `<button class="btn sm" data-reopen="${r.id}">Reopen</button>`}
       <button class="btn sm danger" data-del="${r.id}">Delete</button></div>
-      <p class="meta">MoE ±${r.moe}% · Turnout ${r.turnout_min ?? '?'}–${r.turnout_max ?? '?'} · ${r.candidates.map((c) => `${esc(c.full_name)} ${pct(c.vote_share)}`).join(' · ')}${r.undecided ? ` · Undecided ${pct(r.undecided)}` : ''}</p></div>`).join('')
+      <p class="meta">${r.lead.total ? `${r.lead.total.toLocaleString('en-US')} votes · ` : 'No votes yet · '}${r.candidates.map((c) => `${esc(c.full_name)} ${c.votes.toLocaleString('en-US')}${c.vote_share != null ? ` (${pct(c.vote_share)})` : ''}`).join(' · ')}</p></div>`).join('')
     : '<div class="state">No races configured. Create one to populate the public forecast.</div>'}`;
   $('#add', pane).onclick = () => raceForm(null, people, issues, reload);
   if (autoOpen) raceForm(null, people, issues, reload);
@@ -351,35 +351,38 @@ function raceForm(r, peopleIn, issues, reload) {
   const opts = (sel) => `<option value="">Choose a person…</option><option value="new">＋ Add a new candidate…</option>${people.map((p) => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${esc(p.full_name)}${p.category === 'candidate' ? '' : ` — ${esc(p.title)}`}</option>`).join('')}`;
   const f = openForm(r ? 'Edit election' : 'Set up an election', `<div class="form-grid">
     <label class="f full">Election name<input name="title" required maxlength="150" placeholder="2026 District Attorney Special Election" value="${esc(r?.title)}"></label>
-    <label class="f">Margin of error <span class="hint">± percentage points</span><input name="moe" type="number" step="0.1" min="0" max="25" required value="${r?.moe ?? 3}"></label>
-    <div class="f">Expected turnout <span class="hint">optional, voters</span><div><input name="turnout_min" type="number" min="0" placeholder="from" value="${r?.turnout_min ?? ''}"> – <input name="turnout_max" type="number" min="0" placeholder="to" value="${r?.turnout_max ?? ''}"></div></div>
-    <div class="full"><strong>Candidates and projected vote share</strong>
-      <div id="cands"></div><div class="toolbar"><button type="button" class="btn sm" id="addc">+ Add candidate</button><button type="button" class="btn sm" id="even">Split evenly</button><span id="sum" class="meta"></span></div></div>
-    <details class="full"><summary>Optional: voter issue priorities (feeds the stacked bar chart)</summary><p class="meta">For each candidate’s supporters, what share name each issue as their top priority? Each row should total 100.</p><div id="prio" class="prio-grid"></div></details></div>`,
+    <div class="f">Expected turnout <span class="hint">optional, number of voters</span><div><input name="turnout_min" type="number" min="0" placeholder="from" value="${r?.turnout_min ?? ''}"> – <input name="turnout_max" type="number" min="0" placeholder="to" value="${r?.turnout_max ?? ''}"></div></div>
+    <div class="full"><strong>Candidates and votes counted</strong> <span class="hint meta">Enter actual vote counts — percentages are calculated for you. Leave at 0 until votes come in.</span>
+      <div id="cands"></div><div class="toolbar"><button type="button" class="btn sm" id="addc">+ Add candidate</button><span id="sum" class="meta"></span></div></div>
+    <details class="full"><summary>Optional: voter issue priorities (feeds the stacked bar chart)</summary><p class="meta">For each candidate’s supporters, enter how many named each issue as their top priority. Percentages are calculated.</p><div id="prio" class="prio-grid"></div></details></div>`,
   async (form) => {
     const candidates = readCands(); const priorities = {};
     $$('[data-prio]', form).forEach((row) => { priorities[row.dataset.prio] = Object.fromEntries(issues.map((i, k) => [i, row.querySelectorAll('input')[k].value])); });
-    const body = { title: form.title.value, moe: form.moe.value, turnout_min: form.turnout_min.value, turnout_max: form.turnout_max.value, candidates, priorities };
+    const body = { title: form.title.value, turnout_min: form.turnout_min.value, turnout_max: form.turnout_max.value, candidates, priorities };
     await api(r ? `/api/admin/races/${r.id}` : '/api/admin/races', { method: r ? 'PUT' : 'POST', body }); toast('Election saved.'); reload();
   }, { wide: true, submitLabel: 'Save election' });
   const cands = $('#cands', dlg);
-  const readCands = () => [...cands.querySelectorAll('.cand-row')].map((c) => ({ person_id: c.querySelector('select').value, vote_share: c.querySelector('input[type=number]').value })).filter((c) => c.person_id && c.person_id !== 'new');
+  const readCands = () => [...cands.querySelectorAll('.cand-row')].map((c) => ({ person_id: c.querySelector('select').value, votes: c.querySelector('input[type=number]').value })).filter((c) => c.person_id && c.person_id !== 'new');
   const drawPrio = () => {
     const chosen = readCands(); const old = {};
     $$('[data-prio]', dlg).forEach((row) => { old[row.dataset.prio] = [...row.querySelectorAll('input')].map((i) => i.value); });
     $('#prio', dlg).innerHTML = `<b>Supporters of</b>${issues.map((i) => `<b>${esc(i)}</b>`).join('')}` + chosen.map((c) => {
       const p = people.find((x) => x.id === Number(c.person_id)); const cur = r?.priorities.filter((x) => x.person_id === p.id);
-      return `<span style="display:contents" data-prio="${p.id}"><span>${esc(p.full_name)}</span>${issues.map((i, k) => `<input type="number" min="0" max="100" step="0.1" aria-label="${esc(p.full_name)} ${esc(i)}" value="${old[p.id]?.[k] ?? cur?.find((x) => x.issue === i)?.pct ?? ''}">`).join('')}</span>`;
+      return `<span style="display:contents" data-prio="${p.id}"><span>${esc(p.full_name)}</span>${issues.map((i, k) => `<input type="number" min="0" step="1" aria-label="${esc(p.full_name)} ${esc(i)} (count)" value="${old[p.id]?.[k] ?? cur?.find((x) => x.issue === i)?.count ?? ''}">`).join('')}</span>`;
     }).join('');
   };
-  const sum = () => { const t = readCands().reduce((s, c) => s + (Number(c.vote_share) || 0), 0); $('#sum', dlg).innerHTML = `Total ${Math.round(t * 10) / 10}% ${t > 100.05 ? '<span class="warn">⚠ over 100</span>' : `· undecided ${Math.round((100 - t) * 10) / 10}%`}`; };
+  const sum = () => {
+    // Live preview of the calculated shares (the server derives the real ones from the counts).
+    const rows = [...cands.querySelectorAll('.cand-row')]; const t = rows.reduce((s, c) => s + (Number(c.querySelector('input[type=number]').value) || 0), 0);
+    rows.forEach((c) => { const v = Number(c.querySelector('input[type=number]').value) || 0; c.querySelector('.calc').textContent = t > 0 ? `${Math.round((v / t) * 1000) / 10}%` : '—'; });
+    $('#sum', dlg).textContent = t > 0 ? `${t.toLocaleString('en-US')} votes counted` : 'No votes yet — the public page will say “Awaiting votes”.';
+  };
   const addCand = (c) => {
-    cands.insertAdjacentHTML('beforeend', `<div class="cand-wrap"><div class="cand-row"><select aria-label="Candidate">${opts(c?.id)}</select><input type="number" min="0" max="100" step="0.1" aria-label="Vote share %" placeholder="%" value="${c?.vote_share ?? ''}"><button type="button" class="btn sm danger" data-rm aria-label="Remove candidate">✕</button></div>
+    cands.insertAdjacentHTML('beforeend', `<div class="cand-wrap"><div class="cand-row"><select aria-label="Candidate">${opts(c?.id)}</select><input type="number" min="0" step="1" aria-label="Votes counted" placeholder="votes" value="${c?.votes ?? 0}"><span class="calc meta" aria-label="Calculated share">—</span><button type="button" class="btn sm danger" data-rm aria-label="Remove candidate">✕</button></div>
       <div class="newp" hidden><input placeholder="Full name" data-n="name" maxlength="100"><input placeholder="Title" data-n="title" maxlength="120"><select data-n="ag" aria-label="Agency"><option value="">Agency…</option>${agenciesCache.map((a) => `<option value="${a.id}">${esc(a.code)}</option>`).join('')}</select><button type="button" class="btn sm primary" data-create>Create</button></div></div>`);
   };
   (r?.candidates ?? [null, null]).forEach(addCand);
   $('#addc', dlg).onclick = () => addCand(null);
-  $('#even', dlg).onclick = () => { const rows = [...cands.querySelectorAll('.cand-row')].filter((c) => c.querySelector('select').value && c.querySelector('select').value !== 'new'); rows.forEach((c) => { c.querySelector('input').value = Math.floor(1000 / rows.length) / 10; }); sum(); };
   cands.addEventListener('click', async (e) => {
     const wrap = e.target.closest('.cand-wrap'); if (!wrap) return;
     if (e.target.closest('[data-rm]')) { wrap.remove(); sum(); drawPrio(); }
@@ -410,7 +413,7 @@ async function recallsPane(pane, reload, _x, autoOpen) {
       <button class="btn sm" data-edit="${r.id}">Update</button><button class="btn sm" data-arch="${r.id}">Conclude → archive</button><button class="btn sm danger" data-del="${r.id}">Delete</button></div>
       <div class="progress"><i style="width:${r.progress_pct}%"></i></div><span class="meta">${r.verified} / ${r.threshold} verified (${r.progress_pct}%)${r.milestone ? ` · milestone ${r.milestone}` : ''}</span></div>`).join('') : '<div class="state">No active petitions.</div>'}
     <h3 style="margin-top:22px">Referendum archive</h3><div class="a-card">${archived.length ? `<table><thead><tr><th>Concluded</th><th>Official</th><th>Grounds</th><th>Outcome</th><th class="num">Result</th><th></th></tr></thead><tbody>
-    ${archived.map((r) => `<tr><td>${fmtDate(r.concluded_on)}</td><td>${esc(r.person.full_name)}</td><td>${esc(r.grounds)}</td><td>${esc(r.outcome)}</td><td class="num">${r.result_pct != null ? pct(r.result_pct) : '–'}</td><td><button class="btn sm danger" data-del="${r.id}">Delete</button></td></tr>`).join('')}</tbody></table>` : '<div class="state">Archive is empty.</div>'}</div>`;
+    ${archived.map((r) => `<tr><td>${fmtDate(r.concluded_on)}</td><td>${esc(r.person.full_name)}</td><td>${esc(r.grounds)}</td><td>${esc(r.outcome)}</td><td class="num">${r.result_pct != null ? `${pct(r.result_pct)} Yes` : '–'}</td><td><button class="btn sm danger" data-del="${r.id}">Delete</button></td></tr>`).join('')}</tbody></table>` : '<div class="state">Archive is empty.</div>'}</div>`;
   const by = (id) => active.find((r) => r.id === Number(id));
   const form = (r) => openForm(r ? 'Update recall petition' : 'New recall petition', `<div class="form-grid">
     <label class="f">Who is the recall against?<select name="person_id" required><option value="">Select…</option>${people.map((p) => `<option value="${p.id}" ${r?.person_id === p.id ? 'selected' : ''}>${esc(p.full_name)} — ${esc(p.title)}</option>`).join('')}</select></label>
@@ -431,9 +434,9 @@ async function recallsPane(pane, reload, _x, autoOpen) {
   $$('[data-arch]', pane).forEach((b) => b.onclick = () => {
     const r = by(b.dataset.arch);
     openForm(`Archive recall of ${r.person.full_name}`, `<div class="form-grid"><label class="f">Outcome<select name="outcome"><option>Recalled</option><option>Retained</option><option>Failed to qualify</option></select></label>
-      <label class="f">Result % <span class="hint">recall vote, optional</span><input name="result_pct" type="number" step="0.1" min="0" max="100"></label>
+      <label class="f">Yes votes <span class="hint">optional</span><input name="votes_yes" type="number" min="0" step="1"></label><label class="f">No votes <span class="hint">% is calculated</span><input name="votes_no" type="number" min="0" step="1"></label>
       <label class="f">Concluded on<input name="concluded_on" type="date" value="${today()}"></label></div><p class="meta">A “Recalled” outcome also puts the Recalled badge on the official’s card (they stay active until you archive them).</p>`,
-    async (f) => { await api(`/api/admin/recalls/${r.id}/archive`, { method: 'POST', body: { outcome: f.outcome.value, result_pct: f.result_pct.value, concluded_on: f.concluded_on.value } }); toast('Moved to archive.'); reload(); }, { submitLabel: 'Move to archive' });
+    async (f) => { await api(`/api/admin/recalls/${r.id}/archive`, { method: 'POST', body: { outcome: f.outcome.value, votes_yes: f.votes_yes.value, votes_no: f.votes_no.value, concluded_on: f.concluded_on.value } }); toast('Moved to archive.'); reload(); }, { submitLabel: 'Move to archive' });
   });
 }
 

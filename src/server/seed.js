@@ -32,10 +32,10 @@ const OFFICIALS = [
   { name: 'Owen Fairchild', handle: '@ElectoralAdmin', title: 'Electoral Commission Administrator', ag: 'HCEC', cat: 'department', a0: 52, a1: 53, d0: 28, d1: 28, dnet: 0.0 },
 ];
 const CANDIDATES = [
-  { name: 'M_ysticWavezzz', handle: '@M_ysticWavezzz', title: 'First Assistant District Attorney', ag: 'HCDAO', share: 39.5, pri: [34, 30, 21, 15] },
-  { name: 'Dannlabs', handle: '@Dannlabs', title: 'Head of Criminal Division', ag: 'HCDAO', share: 26.0, pri: [22, 41, 20, 17] },
-  { name: 'Xolaaz', handle: '@Xolaaz', title: 'Westpoint Prosecutor', ag: 'Westpoint', share: 19.0, pri: [18, 25, 39, 18] },
-  { name: 'Ello8m', handle: '@Ello8m', title: 'Defense Counsel', ag: 'Westpoint', share: 15.5, pri: [15, 27, 18, 40] },
+  { name: 'M_ysticWavezzz', handle: '@M_ysticWavezzz', title: 'First Assistant District Attorney', ag: 'HCDAO', votes: 118, pri: [102, 90, 63, 45] },
+  { name: 'Dannlabs', handle: '@Dannlabs', title: 'Head of Criminal Division', ag: 'HCDAO', votes: 78, pri: [17, 32, 16, 13] },
+  { name: 'Xolaaz', handle: '@Xolaaz', title: 'Westpoint Prosecutor', ag: 'Westpoint', votes: 57, pri: [10, 14, 22, 11] },
+  { name: 'Ello8m', handle: '@Ello8m', title: 'Defense Counsel', ag: 'Westpoint', votes: 47, pri: [7, 13, 8, 19] },
 ];
 
 function buildPolls(o, idx) {
@@ -100,18 +100,18 @@ export function seed() {
     ids.Pike = insPerson.run('Aldous Pike', '@CouncilorPike', 'County Councilor', ag.Council, 'constitutional', 'recalled', '2026-06-01 00:00:00', 'Recalled May 18, 2026').lastInsertRowid;
     for (const c of CANDIDATES) ids[c.name] = insPerson.run(c.name, c.handle, c.title, ag[c.ag], 'candidate', '', null, null).lastInsertRowid;
 
-    const race = db.prepare('INSERT INTO races (title, moe, turnout_min, turnout_max) VALUES (?,?,?,?)').run('2026 District Attorney Special Election', 2.5, 250, 300).lastInsertRowid;
+    const race = db.prepare('INSERT INTO races (title, turnout_min, turnout_max) VALUES (?,?,?)').run('2026 District Attorney Special Election', 250, 300).lastInsertRowid;
     const issues = ['Prosecution Speed', 'Evidence Standards', 'Public Safety Cooperation', 'Ethics'];
     for (const c of CANDIDATES) {
-      db.prepare('INSERT INTO race_candidates VALUES (?,?,?)').run(race, ids[c.name], c.share);
-      issues.forEach((issue, i) => db.prepare('INSERT INTO race_priorities VALUES (?,?,?,?)').run(race, ids[c.name], issue, c.pri[i]));
+      db.prepare('INSERT INTO race_candidates (race_id, person_id, votes) VALUES (?,?,?)').run(race, ids[c.name], c.votes);
+      issues.forEach((issue, i) => db.prepare('INSERT INTO race_priorities (race_id, person_id, issue, votes) VALUES (?,?,?,?)').run(race, ids[c.name], issue, c.pri[i]));
     }
-    const insRecall = db.prepare(`INSERT INTO recalls (person_id, grounds, threshold, milestone, verified, filed_on, status, outcome, result_pct, concluded_on, notes)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
-    insRecall.run(ids['Dale Ridgeway'], 'Neglect', 150, 100, 97, '2026-08-20', 'active', null, null, null, 'Petition cites jail-inspection lapses.');
-    insRecall.run(ids['Priya Nandakumar'], 'Corruption', 120, 60, 34, '2026-09-08', 'active', null, null, null, 'Petition cites the 2025 hauling contract.');
-    insRecall.run(ids['Francis Whitcombe'], 'Corruption', 140, 140, 152, '2026-07-30', 'archived', 'Recalled', 64.6, '2026-09-27', 'Referendum passed; DA special election called.');
-    insRecall.run(ids.Pike, 'Neglect', 100, 100, 118, '2026-04-02', 'archived', 'Recalled', 58.1, '2026-05-18', null);
+    const insRecall = db.prepare(`INSERT INTO recalls (person_id, grounds, threshold, milestone, verified, filed_on, status, outcome, votes_yes, votes_no, concluded_on, notes)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+    insRecall.run(ids['Dale Ridgeway'], 'Neglect', 150, 100, 97, '2026-08-20', 'active', null, null, null, null, 'Petition cites jail-inspection lapses.');
+    insRecall.run(ids['Priya Nandakumar'], 'Corruption', 120, 60, 34, '2026-09-08', 'active', null, null, null, null, 'Petition cites the 2025 hauling contract.');
+    insRecall.run(ids['Francis Whitcombe'], 'Corruption', 140, 140, 152, '2026-07-30', 'archived', 'Recalled', 155, 85, '2026-09-27', 'Referendum passed; DA special election called.');
+    insRecall.run(ids.Pike, 'Neglect', 100, 100, 118, '2026-04-02', 'archived', 'Recalled', 176, 127, '2026-05-18', null);
   })();
 }
 

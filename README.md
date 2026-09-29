@@ -1,6 +1,6 @@
 # Harrison Polling Institute (HPI) platform
 
-Public tracker (approval hub, trend charts, election & recall forecast) plus an authenticated admin dashboard that is the **single source of truth** for everything the public site shows.
+Public tracker (approval hub, trend charts, election results & recall radar) plus an authenticated admin dashboard that is the **single source of truth** for everything the public site shows.
 
 **Stack:** Node 20+ / Express 5 + SQLite (`better-sqlite3`) API, `sharp` for image processing (circular PFPs, thumbnails, summary-card PNG), and a dependency-light vanilla ES-module front-end with Chart.js (served locally, no CDN). Chosen so `npm install && npm start` is the whole setup: no build step, no external database.
 
@@ -21,7 +21,7 @@ For production set `NODE_ENV=production` (secure cookies) and serve behind HTTPS
 Sign in at `/admin/` — the **Start here** screen has four tiles: add an official, log poll results, set up an election, track a recall.
 - **People:** pick where someone appears (approval ratings vs. election candidate). New officials are offered a “log their poll results” step; they stay off the public site until they have a poll.
 - **Poll Results:** type the four answer percentages — “No opinion” fills the remainder; net, MoE and badges are computed.
-- **Elections:** candidates can be created inline while building the race; “Split evenly” fills shares.
+- **Elections:** enter actual **vote counts** only — percentages, the leader and the lead margin are calculated from them (nothing is projected; a race with 0 votes shows “Awaiting votes”). Candidates can be created inline. Issue priorities and recall results are counts too.
 
 ## Structure
 
@@ -43,7 +43,7 @@ Net, approve/disapprove totals, MoE and badges are **never stored or entered** �
 - **Badges** (Δ = latest net − previous poll's net, rounded to 0.1): 🟢▲ Rising Δ ≥ +3.0; 🔴▼ Falling Δ ≤ −3.0; ⚪▬ Steady |Δ| ≤ 1.0; **between 1.0 and 3.0 → neutral gray “△ Edging Up / ▽ Edging Down”**; “New” with no prior poll; “Stale” if the last poll is over 90 days old. Every badge has a glyph and text, not just color.
 - **Poll totals:** must be 100 ± 0.5; a larger gap is rejected unless the row's “save despite mismatch” box is ticked (stored with a ⚠ flag). Batches are all-or-nothing.
 - **Issue priorities** are per-candidate-supporter groups (each totalling 100%), drawn as a stacked bar.
-- **Race lead** is “outside the margin” only when the gap exceeds 2× MoE.
+- **Races** are stored as vote counts; shares/lead are derived in `stats.js`. Older databases migrate automatically (earlier projected shares are not carried over).
 - **Recalls/races:** archiving a recall with outcome *Recalled* sets the Recalled badge; concluding a race sets *Succeeded* on the winner. Neither archives anyone — admins do that manually (Archive tab, searchable).
 - **Auth:** scrypt password hashes, random session tokens (hashed in DB), HttpOnly SameSite=Strict cookies, `requireAdmin` on every `/api/admin` route, a custom header required on writes, login throttling. Roster deletion requires typing the person's name. Remote PFP URLs are fetched with SSRF/size/timeout guards.
 - Seed names other than the four DA candidates and “Francis” are fictional placeholders. Candidate-category people appear only in the forecast, not the approval grid.

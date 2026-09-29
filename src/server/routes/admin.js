@@ -216,38 +216,36 @@ adminRouter.get('/polls/history', (req, res) => {
 // ------------------------------------------------------------------- races
 const ISSUES = ['Prosecution Speed', 'Evidence Standards', 'Public Safety Cooperation', 'Ethics'];
 
+const count = (v) => (v === '' || v == null ? 0 : Number(v));
+const isCount = (n) => Number.isInteger(n) && n >= 0 && n <= 10_000_000;
+
+// Races hold actual vote COUNTS only. Percentages are derived in src/lib/stats.js; nothing is projected.
 function raceInput(body) {
   const errors = [];
   const v = {
     title: requireString(body.title, 'Title', 150, errors),
-    moe: num(body.moe),
     turnout_min: body.turnout_min === '' || body.turnout_min == null ? null : num(body.turnout_min),
     turnout_max: body.turnout_max === '' || body.turnout_max == null ? null : num(body.turnout_max),
   };
-  if (!Number.isFinite(v.moe) || v.moe < 0 || v.moe > 25) errors.push('Margin of error must be between 0 and 25.');
   for (const k of ['turnout_min', 'turnout_max']) {
-    if (v[k] != null && (!Number.isInteger(v[k]) || v[k] < 0)) errors.push('Turnout must be a whole number ≥ 0.');
+    if (v[k] != null && (!Number.isInteger(v[k]) || v[k] < 0)) errors.push('Expected turnout must be a whole number ≥ 0.');
   }
   if (v.turnout_min != null && v.turnout_max != null && v.turnout_min > v.turnout_max) errors.push('Turnout minimum exceeds maximum.');
-  const candidates = isArr(body.candidates) ? body.candidates.map((c) => ({ person_id: Number(c.person_id), vote_share: num(c.vote_share) })) : [];
+  const candidates = isArr(body.candidates) ? body.candidates.map((c) => ({ person_id: Number(c.person_id), votes: count(c.votes) })) : [];
   if (candidates.length < 2) errors.push('A race needs at least two candidates.');
   if (new Set(candidates.map((c) => c.person_id)).size !== candidates.length) errors.push('Each candidate can only appear once.');
   for (const c of candidates) {
     if (!getPerson(c.person_id)) errors.push('Unknown candidate.');
-    if (!Number.isFinite(c.vote_share) || c.vote_share < 0 || c.vote_share > 100) errors.push('Vote shares must be between 0 and 100.');
+    if (!isCount(c.votes)) errors.push('Votes must be whole numbers (0 or more).');
   }
-  const sum = candidates.reduce((s, c) => s + c.vote_share, 0);
-  if (sum > 100.05) errors.push(`Vote shares total ${Math.round(sum * 10) / 10}%, which exceeds 100%.`);
-  // priorities: { [person_id]: { [issue]: pct } } — optional; when a group is supplied it must total 100.
+  // priorities: { [person_id]: { [issue]: count } } — optional counts of supporters naming each issue.
   const priorities = [];
   for (const [pid, issues] of Object.entries(body.priorities ?? {})) {
     if (!candidates.some((c) => c.person_id === Number(pid))) continue;
-    const vals = ISSUES.map((i) => num(issues?.[i]));
-    if (vals.every((x) => !Number.isFinite(x))) continue;
-    if (vals.some((x) => !Number.isFinite(x) || x < 0 || x > 100)) { errors.push('Issue priorities must be numbers between 0 and 100.'); continue; }
-    const t = Math.round(vals.reduce((s, x) => s + x, 0) * 10) / 10;
-    if (Math.abs(t - 100) > 0.5) errors.push(`Issue priorities for ${getPerson(Number(pid))?.full_name} total ${t}%, not 100%.`);
-    ISSUES.forEach((issue, i) => priorities.push({ person_id: Number(pid), issue, pct: vals[i] }));
+    const vals = ISSUES.map((i) => count(issues?.[i]));
+    if (vals.every((x) => x === 0)) continue;
+    if (!vals.every(isCount)) { errors.push('Issue counts must be whole numbers (0 or more).'); continue; }
+    ISSUES.forEach((issue, i) => priorities.push({ person_id: Number(pid), issue, votes: vals[i] }));
   }
   if (errors.length) fail([...new Set(errors)]);
   return { v, candidates, priorities };
@@ -255,12 +253,12 @@ function raceInput(body) {
 
 function saveRace(id, { v, candidates, priorities }) {
   db.transaction(() => {
-    if (id) db.prepare('UPDATE races SET title=@title, moe=@moe, turnout_min=@turnout_min, turnout_max=@turnout_max, updated_at=@now WHERE id=@id').run({ ...v, id, now: nowSql() });
-    else id = db.prepare('INSERT INTO races (title, moe, turnout_min, turnout_max) VALUES (@title,@moe,@turnout_min,@turnout_max)').run(v).lastInsertRowid;
+    if (id) db.prepare('UPDATE races SET title=@title, turnout_min=@turnout_min, turnout_max=@turnout_max, updated_at=@now WHERE id=@id').run({ ...v, id, now: nowSql() });
+    else id = db.prepare('INSERT INTO races (title, turnout_min, turnout_max) VALUES (@title,@turnout_min,@turnout_max)').run(v).lastInsertRowid;
     db.prepare('DELETE FROM race_candidates WHERE race_id=?').run(id);
     db.prepare('DELETE FROM race_priorities WHERE race_id=?').run(id);
-    for (const c of candidates) db.prepare('INSERT INTO race_candidates VALUES (?,?,?)').run(id, c.person_id, c.vote_share);
-    for (const p of priorities) db.prepare('INSERT INTO race_priorities VALUES (?,?,?,?)').run(id, p.person_id, p.issue, p.pct);
+    for (const c of candidates) db.prepare('INSERT INTO race_candidates (race_id, person_id, votes, vote_share) VALUES (?,?,?,0)').run(id, c.person_id, c.votes);
+    for (const p of priorities) db.prepare('INSERT INTO race_priorities (race_id, person_id, issue, votes, pct) VALUES (?,?,?,?,0)').run(id, p.person_id, p.issue, p.votes);
   })();
   return id;
 }
@@ -341,14 +339,16 @@ adminRouter.post('/recalls/:id/archive', (req, res) => {
   const id = idParam(req);
   const outcome = String(req.body?.outcome ?? '');
   if (!['Recalled', 'Retained', 'Failed to qualify'].includes(outcome)) throw httpError(400, 'Choose an outcome.');
-  const pct = req.body?.result_pct === '' || req.body?.result_pct == null ? null : num(req.body.result_pct);
-  if (pct != null && !(pct >= 0 && pct <= 100)) throw httpError(422, 'Result % must be between 0 and 100.');
+  const yes = req.body?.votes_yes === '' || req.body?.votes_yes == null ? null : Number(req.body.votes_yes);
+  const no = req.body?.votes_no === '' || req.body?.votes_no == null ? null : Number(req.body.votes_no);
+  if ([yes, no].some((x) => x != null && !isCount(x))) throw httpError(422, 'Vote counts must be whole numbers (0 or more).');
+  if ((yes == null) !== (no == null)) throw httpError(422, 'Enter both the Yes and No vote counts, or neither.');
   const concluded = req.body?.concluded_on || new Date().toISOString().slice(0, 10);
   if (!isIsoDate(concluded)) throw httpError(422, 'Concluded date is invalid.');
   const r = db.prepare("SELECT * FROM recalls WHERE id=? AND status='active'").get(id);
   if (!r) throw httpError(404, 'Active recall not found.');
   db.transaction(() => {
-    db.prepare("UPDATE recalls SET status='archived', outcome=?, result_pct=?, concluded_on=?, updated_at=? WHERE id=?").run(outcome, pct, concluded, nowSql(), id);
+    db.prepare("UPDATE recalls SET status='archived', outcome=?, votes_yes=?, votes_no=?, concluded_on=?, updated_at=? WHERE id=?").run(outcome, yes, no, concluded, nowSql(), id);
     if (outcome === 'Recalled') db.prepare("UPDATE people SET outcome_badge='recalled' WHERE id=?").run(r.person_id);
   })();
   res.json(recallById(id));

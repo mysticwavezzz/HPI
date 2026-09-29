@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS races (
 CREATE TABLE IF NOT EXISTS race_candidates (
   race_id INTEGER NOT NULL REFERENCES races(id) ON DELETE CASCADE,
   person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
-  vote_share REAL NOT NULL,
+  vote_share REAL NOT NULL DEFAULT 0, -- legacy, unused
   PRIMARY KEY (race_id, person_id)
 );
 -- Issue priorities per candidate's supporter group; each group's issues sum to 100.
@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS race_priorities (
   race_id INTEGER NOT NULL REFERENCES races(id) ON DELETE CASCADE,
   person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
   issue TEXT NOT NULL,
-  pct REAL NOT NULL,
+  pct REAL NOT NULL DEFAULT 0, -- legacy, unused
   PRIMARY KEY (race_id, person_id, issue)
 );
 CREATE TABLE IF NOT EXISTS recalls (
@@ -106,5 +106,14 @@ CREATE TABLE IF NOT EXISTS recalls (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);
+
+// Lightweight forward migrations for databases created by earlier versions.
+const addColumn = (table, col, def) => {
+  if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+};
+addColumn('race_candidates', 'votes', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('race_priorities', 'votes', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('recalls', 'votes_yes', 'INTEGER');
+addColumn('recalls', 'votes_no', 'INTEGER');
 
 export const nowSql = () => new Date().toISOString().slice(0, 19).replace('T', ' ');

@@ -1,5 +1,5 @@
 import { db } from './db.js';
-import { derive, statusBadge, aggregate, raceLead } from '../lib/stats.js';
+import { derive, statusBadge, aggregate, raceLead, shares, round1 } from '../lib/stats.js';
 
 const PERSON_COLS = `p.id, p.full_name, p.handle, p.title, p.category, p.pfp_path, p.thumb_path, p.outcome_badge,
   p.archived_at, p.archive_reason, p.agency_id, a.code AS agency_code, a.name AS agency_name`;
@@ -38,20 +38,27 @@ export const trendFor = (personId, interval) =>
   aggregate(pollsFor(personId), interval === 'monthly' ? 'monthly' : 'weekly');
 
 export function raceDetail(race) {
-  const candidates = db.prepare(`SELECT rc.vote_share, ${PERSON_COLS} FROM race_candidates rc
+  const rows = db.prepare(`SELECT rc.votes, ${PERSON_COLS} FROM race_candidates rc
     JOIN people p ON p.id = rc.person_id LEFT JOIN agencies a ON a.id = p.agency_id
-    WHERE rc.race_id = ? ORDER BY rc.vote_share DESC`).all(race.id);
-  const priorities = db.prepare('SELECT person_id, issue, pct FROM race_priorities WHERE race_id = ? ORDER BY rowid').all(race.id);
-  const sum = candidates.reduce((s, c) => s + c.vote_share, 0);
-  return { ...race, candidates, priorities, lead: raceLead(candidates, race.moe), undecided: Math.max(0, Math.round((100 - sum) * 10) / 10) };
+    WHERE rc.race_id = ? ORDER BY rc.votes DESC, p.full_name`).all(race.id);
+  const pcts = shares(rows.map((c) => c.votes));
+  const candidates = rows.map((c, i) => ({ ...c, vote_share: pcts[i] }));
+  // Issue priorities are stored as counts; each candidate's supporter group is converted to percentages here.
+  const raw = db.prepare('SELECT person_id, issue, votes FROM race_priorities WHERE race_id = ? ORDER BY rowid').all(race.id);
+  const priorities = raw.map((r) => {
+    const group = raw.filter((x) => x.person_id === r.person_id);
+    return { person_id: r.person_id, issue: r.issue, count: r.votes, pct: shares(group.map((x) => x.votes))[group.indexOf(r)] };
+  });
+  return { ...race, candidates, priorities, lead: raceLead(candidates) };
 }
 
 export const listRaces = () => db.prepare('SELECT * FROM races ORDER BY status, id DESC').all().map(raceDetail);
 
 export const listRecalls = (status) => db.prepare(`SELECT r.*, ${PERSON_COLS} ${PERSON_FROM.replace('FROM people p', 'FROM recalls r JOIN people p ON p.id = r.person_id')}
   WHERE r.status = ? ORDER BY COALESCE(r.concluded_on, r.filed_on) DESC, r.id DESC`).all(status)
-  .map(({ id, person_id, grounds, threshold, milestone, verified, filed_on, outcome, result_pct, concluded_on, notes, status: st, ...person }) => ({
-    id, person_id, grounds, threshold, milestone, verified, filed_on, outcome, result_pct, concluded_on, notes, status: st,
+  .map(({ id, person_id, grounds, threshold, milestone, verified, filed_on, outcome, concluded_on, notes, status: st, votes_yes, votes_no, ...person }) => ({
+    id, person_id, grounds, threshold, milestone, verified, filed_on, outcome, concluded_on, notes, status: st, votes_yes, votes_no,
+    result_pct: votes_yes != null && votes_no != null && votes_yes + votes_no > 0 ? round1((votes_yes / (votes_yes + votes_no)) * 100) : null,
     progress_pct: Math.min(100, Math.round((verified / threshold) * 1000) / 10),
     person,
   }));
