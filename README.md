@@ -17,6 +17,12 @@ First start creates the database in `data/`, seeds demo data, and creates the ad
 `npm run reseed` wipes and reseeds data (users kept). `npm run passwd -- <user> <new-password>` resets a password.
 For production set `NODE_ENV=production` (secure cookies) and serve behind HTTPS.
 
+## Admin quick guide
+Sign in at `/admin/` — the **Start here** screen has four tiles: add an official, log poll results, set up an election, track a recall.
+- **People:** pick where someone appears (approval ratings vs. election candidate). New officials are offered a “log their poll results” step; they stay off the public site until they have a poll.
+- **Poll Results:** type the four answer percentages — “No opinion” fills the remainder; net, MoE and badges are computed.
+- **Elections:** candidates can be created inline while building the race; “Split evenly” fills shares.
+
 ## Structure
 
 ```

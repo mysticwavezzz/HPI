@@ -8,16 +8,60 @@ let charts = [];
 const killCharts = () => { charts.forEach((c) => c.destroy()); charts = []; };
 
 // ------------------------------------------------------------- routing
+const ROUTES = { '': ['home', 'Overview'], approval: ['approval', 'Approval Ratings'], elections: ['elections', 'Election Forecast'], forecast: ['elections', 'Election Forecast'], recalls: ['recalls', 'Recall Radar'], method: ['method', 'Methodology'] };
 function route() {
-  const forecast = location.hash.startsWith('#/forecast');
-  $('#nav-approval').toggleAttribute('aria-current', !forecast); if (!forecast) $('#nav-approval').setAttribute('aria-current', 'page');
-  $('#nav-forecast').toggleAttribute('aria-current', forecast); if (forecast) $('#nav-forecast').setAttribute('aria-current', 'page');
-  document.title = `${forecast ? 'Election & Recall Forecast' : 'Approval Ratings'} — Harrison Polling Institute`;
+  const [seg, arg] = location.hash.replace(/^#\/?/, '').split('/');
+  const [key, title] = ROUTES[seg ?? ''] ?? ROUTES[''];
+  $$('.nav a[data-route]').forEach((a) => (a.dataset.route === key ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current')));
+  $('#crumb').textContent = key === 'home' ? 'Home' : `Home › ${title}`;
+  document.title = `${title} — Harrison Polling Institute`;
   killCharts();
-  (forecast ? renderForecast : renderHub)();
+  if (key === 'approval' && ['constitutional', 'department'].includes(arg)) hub.filter = arg; else if (key === 'approval') hub.filter = 'all';
+  ({ home: renderHome, approval: renderHub, elections: renderElections, recalls: renderRecalls, method: renderMethod })[key]();
+  window.scrollTo(0, 0);
 }
 window.addEventListener('hashchange', route);
 main.addEventListener('click', (e) => { if (e.target.dataset.retry) route(); });
+
+// ------------------------------------------------------------ overview
+async function renderHome() {
+  main.innerHTML = loading('overview');
+  try {
+    const [{ officials, updated }, { races, recalls }] = await Promise.all([api('/api/public/officials'), api('/api/public/forecast')]);
+    hub.officials = officials;
+    $('#updated').textContent = updated ? `Latest survey: ${fmtDate(updated)}` : 'No surveys yet';
+    const byNet = [...officials].sort((a, b) => b.summary.net - a.summary.net);
+    const moved = officials.filter((o) => o.summary.badge.delta != null).sort((a, b) => b.summary.badge.delta - a.summary.badge.delta);
+    const race = races.find((r) => r.status === 'active') ?? races[0];
+    const lead = race?.candidates.find((c) => c.id === race.lead.leader);
+    const kpi = (lab, val, sub) => `<div class="kpi"><span class="lab">${lab}</span><span class="val">${val}</span><span class="sub">${sub}</span></div>`;
+    main.innerHTML = `<p class="eyebrow">Harrison County</p><h1>Civic Intelligence Overview</h1>
+      <p class="lede">Independent tracking of voter sentiment, election forecasts and leadership approval ratings.</p>
+      ${officials.length || race || recalls.length ? `<div class="kpis">
+        ${byNet[0] ? kpi('Highest net approval', signed(byNet[0].summary.net), esc(byNet[0].full_name)) : ''}
+        ${moved[0] && moved[0].summary.badge.delta > 0 ? kpi('Biggest riser', `▲ ${signed(moved[0].summary.badge.delta)}`, esc(moved[0].full_name)) : ''}
+        ${moved.at(-1) && moved.at(-1).summary.badge.delta < 0 ? kpi('Biggest decline', `▼ ${signed(moved.at(-1).summary.badge.delta)}`, esc(moved.at(-1).full_name)) : ''}
+        ${lead ? kpi('Election leader', pct(lead.vote_share), `${esc(lead.full_name)} · ${esc(race.title)}`) : ''}
+        ${kpi('Active recalls', String(recalls.length), recalls.length ? 'See Recall Radar' : 'None filed')}</div>` : ''}
+      <div class="section-head"><h2>Latest approval ratings</h2><a href="#/approval">Card view →</a></div>
+      ${officials.length ? `<div class="tablewrap"><table><thead><tr><th>Official</th><th>Title</th><th class="num">Net</th><th class="num">Approve</th><th class="num">Disapprove</th><th class="num">Neutral</th><th>Status</th><th>Surveyed</th></tr></thead><tbody>
+      ${byNet.map((o) => { const s = o.summary; return `<tr data-open="${o.id}" tabindex="0"><th>${esc(o.full_name)} ${outcomeTag(o)}</th><td>${esc(o.title)}</td><td class="num"><strong>${signed(s.net)}</strong></td><td class="num">${pct(s.approve)}</td><td class="num">${pct(s.disapprove)}</td><td class="num">${pct(s.neutral)}</td><td><span class="badge ${s.badge.key}">${esc(s.badge.icon)} ${esc(s.badge.label)}</span></td><td>${fmtDate(s.survey_end)}<br><span class="meta">n=${s.n.toLocaleString('en-US')} ±${s.moe}</span></td></tr>`; }).join('')}</tbody></table></div><p class="meta">Select a row for the full trend chart.</p>`
+        : '<div class="state">No poll results have been published yet.</div>'}
+      ${race ? `<div class="section-head"><h2>Special election snapshot</h2><a href="#/elections">Full forecast →</a></div>${raceHtml(race, { brief: true })}` : ''}`;
+    $$('[data-open]', main).forEach((r) => { r.onclick = () => openDetail(Number(r.dataset.open)); r.onkeydown = (e) => e.key === 'Enter' && r.click(); });
+  } catch (e) { main.innerHTML = errorBox(e, 'home'); }
+}
+
+function renderMethod() {
+  main.innerHTML = `<p class="eyebrow">About the data</p><h1>Methodology</h1>
+    <dl class="gloss">
+      <dt>Net approval</dt><dd>Approve % (strongly + somewhat) minus disapprove % (strongly + somewhat). Computed by the system, never entered by hand.</dd>
+      <dt>Margin of error (±MoE)</dt><dd>Computed at 95% confidence from each survey’s sample size: ±1.96 × √(0.25 / n), the conservative case. Weekly and monthly chart points pool their surveys (sample-size-weighted) and use the combined n.</dd>
+      <dt>Status badges</dt><dd>Compare the latest net rating with the previous poll cycle.<br>🟢 ▲ <b>Rising</b>: +3.0 or more · 🔴 ▼ <b>Falling</b>: −3.0 or more · ⚪ ▬ <b>Steady</b>: within ±1.0 · ⚪ △/▽ <b>Edging</b>: between 1.0 and 3.0 · <b>New</b>: only one poll · <b>Stale</b>: no poll in 90 days.</dd>
+      <dt>Election forecasts</dt><dd>Projected vote share with the stated margin of error. A lead is called “outside the margin” only when it exceeds twice the margin of error.</dd>
+      <dt>Recalls</dt><dd>Verified signatures against the statutory threshold; concluded recalls move to the referendum archive.</dd>
+    </dl>`;
+}
 
 // ----------------------------------------------------------------- hub
 const FILTERS = [['all', 'All Officials'], ['constitutional', 'Constitutional Officers'], ['department', 'Department Leadership']];
@@ -41,7 +85,7 @@ function drawHub() {
     return `<button class="chip" aria-pressed="${k === filter}" data-filter="${k}">${label}<small>${count}</small></button>`;
   }).join('');
   main.innerHTML = `
-    <div class="section-head"><h2>Leadership Approval Ratings</h2><span class="meta">Select a card for the full trend</span></div>
+    <p class="eyebrow">Approval ratings</p><h1>Leadership Approval Ratings</h1><p class="meta">Select a card for the full trend chart.</p>
     <div class="filters" role="group" aria-label="Filter officials">${chips}</div>
     ${shown.length ? `<div class="grid">${shown.map(cardHtml).join('')}</div>`
       : '<div class="state">No officials to show yet. Poll results appear here once an administrator logs them.</div>'}`;
@@ -54,16 +98,16 @@ function cardHtml(o) {
   const cls = s.net > 0 ? 'pos' : s.net < 0 ? 'neg' : '';
   const tip = s.badge.delta == null ? '' : `${signed(s.badge.delta)} net since previous cycle`;
   return `<button class="card" data-open="${o.id}" aria-label="${esc(o.full_name)}, net approval ${signed(s.net)}, ${esc(s.badge.label)}. Open trend chart.">
-    <span class="card-head">${pfp(o)}<span>
+    <span class="card-top">${pfp(o)}<span>
       <h3>${esc(o.full_name)}</h3>
       <span class="role">${esc(o.title)}</span><br>
       ${o.agency_code ? `<span class="tag">${esc(o.agency_code)}</span>` : ''}${outcomeTag(o)}
-    </span></span>
+    </span></span><span class="card-body">
     <span class="netrow"><span class="net ${cls}"><small>Net approval</small>${signed(s.net)}</span>
       <span class="badge ${s.badge.key}" title="${esc(tip)}">${esc(s.badge.icon)} ${esc(s.badge.label)}${s.badge.delta != null ? ` (${signed(s.badge.delta)})` : ''}</span></span>
     <span class="stack" aria-hidden="true"><i class="a" style="width:${s.approve}%"></i><i class="n" style="width:${s.neutral}%"></i><i class="d" style="width:${s.disapprove}%"></i></span>
     <span class="trio"><span class="a"><b>${pct(s.approve)}</b>Approve</span><span class="d"><b>${pct(s.disapprove)}</b>Disapprove</span><span class="n"><b>${pct(s.neutral)}</b>Neutral / no opinion</span></span>
-    <span class="foot">n = ${s.n.toLocaleString('en-US')} · ±${s.moe} pts · ${fmtRange(s.survey_start, s.survey_end)}</span>
+    <span class="foot">n = ${s.n.toLocaleString('en-US')} · ±${s.moe} pts · ${fmtRange(s.survey_start, s.survey_end)}</span></span>
   </button>`;
 }
 
@@ -111,7 +155,7 @@ function drawDetail({ person, interval, points, summary }) {
   const labels = points.map((p) => (interval === 'monthly' ? new Date(`${p.key}-01T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: '2-digit', timeZone: 'UTC' })
     : new Date(`${p.end}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })));
   dlg.innerHTML = `<div class="dlg-body">
-    <div class="dlg-head"><div class="card-head">${pfp(person)}<div><h2 id="dlg-title">${esc(person.full_name)}</h2><span class="role">${esc(person.title)} · ${esc(person.agency_code ?? '')}</span><br>${outcomeTag(person)}
+    <div class="dlg-head"><div class="card-top">${pfp(person)}<div><h2 id="dlg-title">${esc(person.full_name)}</h2><span class="role">${esc(person.title)} · ${esc(person.agency_code ?? '')}</span><br>${outcomeTag(person)}
       ${summary ? `<span class="badge ${summary.badge.key}">${esc(summary.badge.icon)} ${esc(summary.badge.label)}</span> <span class="meta">Net ${signed(summary.net)}</span>` : ''}</div></div>
       <button class="close" id="dlg-close">Close</button></div>
     <div class="seg" role="group" aria-label="Chart interval">
@@ -160,29 +204,36 @@ function drawDetail({ person, interval, points, summary }) {
 }
 
 // ------------------------------------------------------------ forecast
-async function renderForecast() {
-  main.innerHTML = loading('forecasts');
+async function renderElections() {
+  main.innerHTML = loading('forecast');
   try {
-    const { races, recalls, referendums } = await api('/api/public/forecast');
-    $('#updated').textContent = 'Forecast center';
-    main.innerHTML = `<div class="section-head"><h2>Special Election Forecast</h2><span class="meta">Projected vote share with margin of error</span></div>
-      ${races.length ? races.map(raceHtml).join('') : '<div class="state">No elections are being forecast right now.</div>'}
-      <div class="section-head"><h2>Recall Radar</h2><span class="meta">Active petitions and archive</span></div>
-      <div class="panel"><h3>Active recall petitions</h3>
-      ${recalls.length ? recalls.map(recallHtml).join('') : '<p class="meta">No active recall petitions.</p>'}</div>
-      <div class="panel"><h3>Referendum archive</h3>${referendumHtml(referendums)}</div>`;
+    const { races } = await api('/api/public/forecast');
+    $('#updated').textContent = 'Election forecast';
+    main.innerHTML = `<p class="eyebrow">Forecast center</p><h1>Special Election Forecast</h1><p class="meta">Projected vote share with margin of error.</p>
+      ${races.length ? races.map((r) => raceHtml(r)).join('') : '<div class="state">No elections are being forecast right now.</div>'}`;
     races.forEach(drawPriorities);
-  } catch (e) { main.innerHTML = errorBox(e, 'forecast'); }
+  } catch (e) { main.innerHTML = errorBox(e, 'elections'); }
 }
 
-function raceHtml(r) {
+async function renderRecalls() {
+  main.innerHTML = loading('recalls');
+  try {
+    const { recalls, referendums } = await api('/api/public/forecast');
+    $('#updated').textContent = 'Recall radar';
+    main.innerHTML = `<p class="eyebrow">Forecast center</p><h1>Recall Radar</h1>
+      <div class="panel"><div class="ph"><h3>Active recall petitions</h3></div><div class="pb">${recalls.length ? recalls.map(recallHtml).join('') : '<p class="meta">No active recall petitions.</p>'}</div></div>
+      <div class="panel"><div class="ph"><h3>Referendum archive</h3></div><div class="pb">${referendumHtml(referendums)}</div></div>`;
+  } catch (e) { main.innerHTML = errorBox(e, 'recalls'); }
+}
+
+function raceHtml(r, { brief = false } = {}) {
   const maxShare = Math.max(...r.candidates.map((c) => c.vote_share), 0);
   const scale = Math.max(50, Math.ceil((maxShare + r.moe) / 10) * 10);
   const leader = r.candidates.find((c) => c.id === r.lead.leader);
   const lean = leader && r.lead.gap != null
     ? (r.lead.decisive ? `${leader.full_name} leads by ${r.lead.gap} pts — outside the margin of error` : `${leader.full_name} leads by ${r.lead.gap} pts — within the margin of error`) : '';
   return `<section class="panel" aria-labelledby="race-${r.id}">
-    <h3 id="race-${r.id}">${esc(r.title)}</h3>
+    <div class="ph"><h3 id="race-${r.id}">${esc(r.title)}</h3></div><div class="pb">
     <div>${r.status === 'concluded' ? '<span class="status-chip" style="background:var(--yes)">Concluded</span>' : ''}
       <span class="status-chip">±${r.moe}% margin of error</span>
       ${r.turnout_min != null || r.turnout_max != null ? `<span class="status-chip" style="background:var(--ink-2)">Est. turnout ${[r.turnout_min, r.turnout_max].filter((x) => x != null).map((x) => x.toLocaleString('en-US')).join('–')} voters</span>` : ''}</div>
@@ -196,10 +247,10 @@ function raceHtml(r) {
           <span class="bar-label" style="left:${Math.max(wr, 0)}%">${pct(c.vote_share)} <span class="meta">±${r.moe}</span></span></div></div>`;
     }).join('')}</div>
     ${r.undecided > 0 ? `<p class="meta">Undecided / other: ${pct(r.undecided)}</p>` : ''}
-    ${r.priorities.length ? `<h3 style="font-size:20px;margin-top:26px">Voter issue priorities</h3><p class="meta">Top issue by candidate’s supporters (each bar totals 100%).</p>
+    ${r.priorities.length && !brief ? `<h3 style="font-size:20px;margin-top:26px">Voter issue priorities</h3><p class="meta">Top issue by candidate’s supporters (each bar totals 100%).</p>
       <div class="chart-box tall"><canvas id="pri-${r.id}" role="img" aria-label="Stacked bar chart of voter issue priorities by candidate supporter group; a data table follows."></canvas></div>
       <details><summary>View data table</summary>${priorityTable(r)}</details>` : ''}
-  </section>`;
+  </div></section>`;
 }
 
 const ISSUE_COLORS = ['#184f95', '#a51c1c', '#1c6b3a', '#b7791f'];
@@ -255,5 +306,4 @@ function referendumHtml(list) {
     <td><span class="tag ${r.outcome === 'Recalled' ? 'recalled' : ''}">${esc(r.outcome)}</span></td><td class="num">${r.result_pct != null ? pct(r.result_pct) : '–'}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
-if (!location.hash) location.hash = '#/approval';
 route();
