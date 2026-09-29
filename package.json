@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Harrison Polling Institute — public tracker + admin dashboard",
   "engines": {
-    "node": ">=20"
+    "node": ">=20 <25"
   },
   "scripts": {
     "start": "node src/server/index.js",
