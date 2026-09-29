@@ -24,6 +24,7 @@ app.use((req, res, next) => {
 });
 app.use(express.json({ limit: '256kb' }));
 
+app.get('/healthz', (req, res) => { db.prepare('SELECT 1').get(); res.send('ok'); });
 app.post('/api/auth/login', login);
 app.post('/api/auth/logout', logout);
 app.get('/api/auth/me', me);
@@ -52,6 +53,6 @@ const creds = await ensureAdminUser();
 if (creds) {
   console.log(`\n  Admin account created → username: ${creds.username}  password: ${creds.password}${creds.generated ? '  (generated — change it via `npm run passwd`)' : ''}\n`);
 }
-seedIfEmpty();
-const server = app.listen(config.port, () => console.log(`HPI running at http://localhost:${config.port}  (admin: /admin/)`));
+if (process.env.SEED_DEMO !== 'false') seedIfEmpty();
+const server = app.listen(config.port, '0.0.0.0', () => console.log(`HPI running at http://localhost:${config.port}  (admin: /admin/)`));
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => server.close(() => { db.close(); process.exit(0); }));

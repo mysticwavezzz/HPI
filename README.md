@@ -42,3 +42,11 @@ Net, approve/disapprove totals, MoE and badges are **never stored or entered** �
 - **Auth:** scrypt password hashes, random session tokens (hashed in DB), HttpOnly SameSite=Strict cookies, `requireAdmin` on every `/api/admin` route, a custom header required on writes, login throttling. Roster deletion requires typing the person's name. Remote PFP URLs are fetched with SSRF/size/timeout guards.
 - Seed names other than the four DA candidates and “Francis” are fictional placeholders. Candidate-category people appear only in the forecast, not the approval grid.
 - Styling: ROSPAN H-SPAN blue/red diverging palette and navy brand; The Harrison Independent's rules, serif headlines and section heads.
+
+## Deploying on Railway
+1. Create a project from this repo (Nixpacks detects Node; `railway.json` sets the start command and `/healthz` check).
+2. **Add a Volume** mounted at `/data` — SQLite and uploaded PFPs live on disk, and without a volume they're wiped on every deploy.
+3. Set variables: `NODE_ENV=production`, `DATA_DIR=/data`, `ADMIN_USERNAME`, `ADMIN_PASSWORD` (strong; used only on first boot), and `SEED_DEMO=false` if you don't want demo data on the live site.
+4. Railway supplies `PORT`; the app binds to it automatically. HTTPS terminates at Railway's proxy (`trust proxy` is on in production, so secure cookies work).
+5. Run one replica only (SQLite is single-writer). Back up via Admin → Media Export → JSON.
+Change the admin password later with `railway run npm run passwd -- admin <new-password>`.
